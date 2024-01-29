@@ -1,26 +1,239 @@
 ---
-title: "lecture3"
+title: "Lecture 3"
 format: html
 editor: visual
 ---
 
-## Lecture 3
+# Lecture 3 Parts 1 and 2
 
-Quarto enables you to weave together content and executable code into a finished document. To learn more about Quarto see <https://quarto.org>.
+## 3.1 Choosing Graphic Forms
 
-## Running Code
+-   We tend to understand complex numbers better when they are represented visually
+-   Mapping data is powerful
+    -   values of a variable of interest represented by visuals (height, color, size)
+-   there is a hierarchy of visual interest aka some things are easier to understand than others
+-   tips for choosing graphic forms
+    -   what is the message you want to convey
+    -   consider size of data and type of data (qual vs quan)
+    -   try different graphic forms
+    -   arranging graphic components
+    -   test the outcome of the graphic on others and who could represent your target audience
 
-When you click the **Render** button a document will be generated that includes both content and the output of embedded code. You can embed code like this:
+## 3.2 Visualizing Distributions
+
+-   The data: bottom temperatures at Mohawk Reef
+    -   Santa Barbara Coastal Long Term Ecological Research (SBC LTER) established in 2000 to understand ecology of coastal kelp forest ecosystem
 
 ```{r}
-1 + 1
-```
+# ..........................setup..........................
+# load packages ----
+library(tidyverse)
+library(chron) # helps with dates and times
+library(naniar) # helps with missing data
 
-You can add options to executable code like this
+#..........................import data...........................
+mko <- read_csv("https://portal.edirepository.org/nis/dataviewer?packageid=knb-lter-sbc.2007.17&entityid=02629ecc08a536972dec021f662428aa")
+
+#..........................wrangle...........................
+# select columns wanted
+mko_clean <- mko |> 
+  select(year, month, day, decimal_time, Temp_bot) 
+
+# view df and examine variable types
+str(mko_clean)
+
+mko_clean <- mko_clean |> 
+  # create a column called date that will have year month and day separated by -'s, and retain original columns
+  unite(date, year, month, day, sep = "-", remove = FALSE) |> 
+  # create new column called time from chron::times to transform decimal time to more readable format
+  mutate(time = times(decimal_time)) |> 
+  #create new column called date_time that combines date time and with a space in between, and drop original columns
+  unite(date_time, date, time, sep = " ") |> 
+  # convert date_time into a date_time object, and coerce other columns to different character types
+  mutate(date_time = as.POSIXct(date_time, "%Y-%m-%d %H:%M:%S", tz = "GMT"), 
+         year = as.factor(year),
+         month = as.factor(month),
+         day = as.numeric(day)) |> 
+  # create a new column called month_name and use month.name to index our months as characters, and then transform to factor form
+  mutate(month_name = as.factor(month.name[month])) |> 
+  # naniar::replace_with_na replace 9999 in Temp_bot column to NA
+  replace_with_na(replace = list(Temp_bot = 9999))
+```
 
 ```{r}
-#| echo: false
-2 * 2
+# ..........................histograms..........................
+# original plot ----
+mko_clean |> 
+  # re-order month_name to the correct month order so they no longer appear alphabetical
+  mutate(month_name = factor(month_name, levels = month.name)) |> 
+  ggplot(aes(x = Temp_bot, fill = month_name)) +
+  # position = identity forces values to x-axis, make more see through so you can see overlap
+  geom_histogram(position = "identity", alpha = 0.5)
+
+# small multiples ----
+mko_clean |> 
+  # re-order month_name to the correct month order so they no longer appear alphabetical
+  mutate(month_name = factor(month_name, levels = month.name)) |> 
+  ggplot(aes(x = Temp_bot)) +
+  # position = identity forces values to x-axis, make more see through so you can see overlap
+  geom_histogram(position = "identity") +
+  # separate histogram into individual hists for each month so 12 panels
+  facet_wrap(~month_name)
+
+# fewer month comparison ----
+mko_clean |> 
+  # re-order month_name to the correct month order so they no longer appear alphabetical
+  mutate(month_name = factor(month_name, levels = month.name)) |>
+  # only look at the coldest, middle, and hottest temp months
+  filter(month_name %in% c("April", "June", "October")) |> 
+  ggplot(aes(x = Temp_bot, fill = month_name)) +
+  # position = identity forces values to x-axis, make more see through so you can see overlap, and determine how many bins to split the data into
+  geom_histogram(position = "identity", alpha = 0.5, bins = 20) +
+  # fill 3 groups with specific colors in specific order
+  scale_fill_manual(values = c("#2C5374", "#ADD8E6", "#8B3A3A"))
 ```
 
-The `echo: false` option disables the printing of code (only output is displayed).
+```{r}
+# ..........................density plots..........................
+# original plot ----
+mko_clean |> 
+  # re-order month_name to the correct month order so they no longer appear alphabetical
+  mutate(month_name = factor(month_name, levels = month.name)) |> 
+  ggplot(aes(x = Temp_bot, fill = month_name)) +
+  # position = identity forces values to x-axis, make more see through so you can see overlap
+  geom_density(alpha = 0.5)
+
+# fewer month comparison ----
+mko_clean |> 
+  # re-order month_name to the correct month order so they no longer appear alphabetical
+  mutate(month_name = factor(month_name, levels = month.name)) |>
+  # only look at the coldest, middle, and hottest temp months
+  filter(month_name %in% c("April", "June", "October")) |> 
+  ggplot(aes(x = Temp_bot, fill = month_name)) +
+  #make more see through so you can see overlap, and determine how smooth curve is, less than 1 more detailed, more than 1 more smoothed over
+  geom_density(alpha = 0.5, adjust = 0.4) +
+  # fill 3 groups with specific colors in specific order
+  scale_fill_manual(values = c("#2C5374", "#ADD8E6", "#8B3A3A"))
+```
+
+```{r}
+# ..........................histogram vs density plots..........................
+# dummy data ----
+dummy_data <- data.frame(value = c(rnorm(n = 100, mean = 5),
+                                   rnorm(n = 200, mean = 10)),
+                         group = rep(c("A", "B"),
+                                     times = c(100, 200)))
+# histogram
+ggplot(dummy_data, aes(x = value, fill = group)) +
+  geom_histogram(position = "identity", alpha = 0.7) +
+  # add rug plot to indicate data distribution and sample size
+  geom_rug(aes(color = group), alpha = 0.75)
+```
+
+It's easy to see that group B has a larger sample size than group A when looking at our histogram. Additionally, we can get a good sense of our data distribution.
+
+```{r}
+# density plot
+ggplot(dummy_data, aes(x = value, fill = group)) +
+  geom_density(alpha = 0.7) +
+  geom_rug(aes(color = group), alpha = 0.75)
+```
+
+We lose information about sample size in our density plot (note that both curves are \~the same height, despite group B having 2x as many observations). However, they're great for visualizing the shape of our distributions since they are unaffected by the number of bins.
+
+```{r}
+# ..........................histogram and density plots..........................
+# histogram and density plot overlaid
+ggplot(mko_clean, aes(x = Temp_bot, y = after_stat(density))) + # scale down hist to match density curve
+  geom_histogram(fill = "gray", color = "black", alpha = 0.75) +
+  geom_density(size = 1) 
+```
+
+```{r}
+# ...................Scaled density plots for comparing groups to a whole.....................
+library(palmerpenguins)
+# use `after_stat(count)` to plot density of observations ----
+ggplot(penguins, aes(x = body_mass_g, y = after_stat(count))) +
+ 
+  # plot full distribution curve with label "all penguins"; remove 'species' col so that this doesn't get faceted later on ----
+  geom_density(data = select(penguins, -species), 
+               aes(fill = "all penguins"), color = "transparent") +
+  
+  # plot second curve with label "species" ----
+  geom_density(aes(fill = "species"), color = "transparent") +
+  
+  # facet wrap by species ----
+  facet_wrap(~species, nrow = 1) +
+  
+  # update colors, x-axis label, legend position ----
+  scale_fill_manual(values = c("grey","#0C8346"), name = NULL) +
+  labs(x = "Body Mass (g)") +
+  theme(legend.position = "top")
+```
+
+```{r}
+# ..........................ridgeline plots..........................
+# original plot ----
+ggplot(mko_clean, aes(x = Temp_bot, y = month_name,
+                      # color by x-variable and will be dictated by the gradient later set
+                      fill = after_stat(x))) +
+  # call ridges plot, and set how long tails of data will show
+  ggridges::geom_density_ridges_gradient(rel_min_height = 0.01,
+                                         # sets overlap of ridges, higher number = more overlap
+                                         scale = 3) +
+  # re-order months on y-axis to have January at top and December on bottom
+  scale_y_discrete(limits = rev(month.name)) +
+  # set color gradient for after_stat to pull from
+  scale_fill_gradientn(colors = c("#2C5374","#849BB4", "#D9E7EC", "#EF8080", "#8B3A3A"))
+  
+```
+
+```{r}
+# ..........................boxplots..........................
+# original plot ----
+ggplot(mko_clean, aes(x = month_name, y = Temp_bot, fill = month_name)) +
+  geom_boxplot() +
+  scale_x_discrete(limits = rev(month.name)) +
+  coord_flip() +
+  # highlight october by graying out other months
+  gghighlight::gghighlight(month_name == "October") +
+  theme(
+    # remove legend
+    legend.position = "none"
+  )
+
+# jitter and dodge ----
+penguins |> 
+  mutate(year = as.factor(year)) |> 
+  ggplot(aes(x = species, y = body_mass_g, color = year)) +
+  geom_boxplot() +
+  # add points to highligh distribution
+  geom_point(alpha = 0.5,
+             # add jitter in order to space points so you can see distribution on a category
+             position = position_jitterdodge(jitter.width = 0.2)) +
+  coord_flip()
+```
+
+```{r}
+# ..........................violin plots..........................
+# original plot ----
+ggplot(mko_clean, aes(x = month_name, y = Temp_bot)) +
+  geom_violin() +
+  scale_x_discrete(limits = rev(month.name)) +
+  coord_flip()
+
+# overlay boxplot; provides some sense of summary statistics
+ggplot(mko_clean, aes(x = month_name, y = Temp_bot)) +
+  geom_violin() +
+  geom_boxplot(width = 0.1,
+               color = "gray",
+               alpha = 0.5, 
+               outlier.color = "red") +
+  scale_x_discrete(limits = rev(month.name)) +
+  coord_flip()
+
+# half violin half dot
+ggplot(penguins, aes(x = species, y = bill_length_mm, fill = species)) +
+  see::geom_violindot(size_dots = 5, alpha = 0.5) +
+  theme(legend.position = "none")
+```
