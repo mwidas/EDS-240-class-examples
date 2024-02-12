@@ -1,20 +1,8 @@
 ---
-title: "discussion"
+title: "discussion4"
 format: html
 editor: visual
 ---
-
-## Discussion
-
-Histograms: look at distribution of data, data spread, as we increase bin size we lose some detail, as we decrease bin size we get potentially too high a level of detail that begins to resemble noise
-
-Density plots: proportion of data that exists at a value
-
-Ridgeline plots: trends over time, and clarify overlying data well
-
-Box plots: look at distribution of data, provides median, and percentiles, but does not account for data density
-
-Violin plots: similar to box plots but highlights data density
 
 ```{r}
 ##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -23,12 +11,10 @@ Violin plots: similar to box plots but highlights data density
 
 #..........................load packages.........................
 library(tidyverse)
-library(geofacet) # facet data for different geographical regions using panels arranged in shapes that mimic geographic topology
 
 #..........................import data...........................
 tuesdata <- tidytuesdayR::tt_load('2021-07-20')
 drought <- tuesdata$drought
-
 
 ##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ##                            wrangle drought data                          ----
@@ -40,6 +26,7 @@ drought_clean <- drought |>
   select(date = valid_start, state_abb, drought_lvl, area_pct) |> 
 
   # add year, month & day cols using {lubridate} fxns ----
+  # NOTE: this step isn't necessary for our plot, but I'm including as examples of how to extract different date elements from a object of class Date using {lubridate}~ ----
   mutate(year = year(date),
          month = month(date, label = TRUE, abbr = TRUE),
          day = day(date)) |>
@@ -83,38 +70,41 @@ drought_clean |>
                      expand = c(0, 0)) +
   
   # add title ----
-  labs(title = "Drought area in California") 
-
+  labs(title = "Drought area in California") +
+  
 ##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-##            BONUS: using {geofacet} to plot data for all states           ----
+##                                                                            --
+##------------------------- NEWLY ADDED THEME CODE!-----------------------------
+##                                                                            --
 ##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-#......remove HI & AK (no data) and also DC from preset grid.....
-mygrid <- geofacet::us_state_grid1 |>
-  filter(!code %in% c("DC", "HI", "AK"))
-
-#..............................plot..............................
-
-# NOTE: this takes a minute to render!
-
-drought_clean |> 
-  filter(drought_lvl != "None") |> 
-  ggplot(aes(x = date, y = area_pct, fill = drought_lvl_long)) +
-  geom_area(position = position_stack(reverse = TRUE)) +
-  geofacet::facet_geo(~state_abb, grid = mygrid) +
-  scale_fill_manual(values = c("#853904", "#FF0000", "#FFC100", "#FFD965", "#FFFF00"))
+  # set theme minimal (includes major/minor grid lines, no axes) ----
+  theme_minimal() +
+  
+  # fine-tune adjustments to plot theme ----
+  theme(
+    
+    # update axis lines & ticks color ----
+    axis.line = element_line(color = "#5A9CD6"),
+    axis.ticks = element_line(color = "#5A9CD6"),
+    
+    # adjust length of axis ticks ----
+    axis.ticks.length = unit(.2, "cm"),
+    
+    # center plot title ----
+    plot.title = element_text(hjust = 0.5, color = "#686868", size = 25,
+                              margin = margin(t = 10, r = 0, b = 15, l = 0)),
+    
+    # remove axis & legend titles ----
+    axis.title = element_blank(),
+    legend.title = element_blank(),
+    
+    # axis text color & size ----
+    axis.text = element_text(color = "#686868", size = 15),
+    legend.text = element_text(color = "#686868", size = 15),
+    
+    # move legend below plot ----
+    legend.position = "bottom",
+  )
 ```
 
-```{r}
-# in-class ugly plot activity
-ggplot(drought, aes(x = state_abb, y = drought_lvl,
-                      # color by x-variable and will be dictated by the gradient later set
-                      fill = after_stat(x))) +
-  # call ridges plot, and set how long tails of data will show
-  ggridges::geom_density_ridges_gradient(rel_min_height = 0.01,
-                                         # sets overlap of ridges, higher number = more overlap
-                                         scale = 3) +
-  # set color gradient for after_stat to pull from
-  scale_fill_gradientn(colors = c("#2C5374","#849BB4", "#D9E7EC", "#EF8080", "#8B3A3A")) +
-  coord_flip()
-```

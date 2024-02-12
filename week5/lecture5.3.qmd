@@ -1,0 +1,188 @@
+```{r}
+##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+##                                    setup                                 ----
+##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+#..........................load packages.........................
+library(tidyverse)
+library(tigris)
+
+#.........................get shape data.........................
+county_geo <- tigris::counties(class = "sf", cb = TRUE) |> # cb = TRUE to use cartographic boundary files
+  
+  # shift US to fit AK, HI, PR (we'll be filtering these out though) and transform CRS to USA Contiguous Albers Equal Area Conic (ESRI:102003) ----
+  shift_geometry()
+
+#....................import precipitation data...................
+precip_data <- read_csv(here::here("week5", "data", "county-jan19-dec23-precip.csv"), skip = 4)
+
+##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+##                               data wrangling                             ----
+##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+     
+##~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+##  ~ wrangle geometries  ----
+##~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+county_geo_wrangled <- county_geo |>
+  
+  # clean up col names ----
+  janitor::clean_names() |>
+  
+  # rename county & state cols ----
+  rename(county = namelsad, state = state_name) |>
+  
+  # remove states / territories that we don't have precip data for ----
+  filter(!state %in% c("Alaska", "Hawaii", "District of Columbia",
+                       "United States Virgin Islands", "Puerto Rico", "American Samoa",
+                       "Commonwealth of the Northern Mariana Islands", "Guam")) |>
+  
+  # capitalize "city" (VA) ----
+  mutate(county = str_replace(string = county, pattern = " city", replacement = " City"))
+
+##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+##  ~ wrangle precipitation data  ----
+##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+precip_wrangled <- precip_data |>
+  
+  # clean up col names ----
+  janitor::clean_names() |>
+  
+  # rename county col ----
+  rename(county = name) |>
+  
+  # filter out DC ----
+  filter(!county %in% c("Washington, D.C.")) |>
+  
+  # update name to match that in county_geo df ----
+  mutate(county = str_replace(string = county, pattern = "Dona Ana County", replacement = "Doña Ana County")) |>
+  
+  # coerce precip & 20th centruy avg from chr to numeric ----
+  mutate(value = as.numeric(value),
+         x1901_2000_mean = as.numeric(x1901_2000_mean)) |>
+  
+  # calculate % change ----
+  mutate(perc_change = ((value - x1901_2000_mean)/x1901_2000_mean)*100) |>
+  
+  # select, rename, reorder cols ----
+  select(id, state, county, mean_1901_2000 = x1901_2000_mean, precip = value, perc_change, anomaly_1901_2000_base_period)
+
+##~~~~~~~~~~~~~~~~~~
+##  ~ join dfs  ----
+##~~~~~~~~~~~~~~~~~~
+
+# join dfs (be sure to join precip TO sf object, not the other way around) -------
+joined_precip_geom <- full_join(county_geo_wrangled, precip_wrangled) 
+```
+
+## Base Map
+
+```{r}
+base_map <- ggplot(joined_precip_geom) +
+  geom_sf(aes(fill = perc_change), linewidth = 0.1) +
+  labs(title = "5-year precipitation compared with the 20th century average",
+       subtitle = "January 2019 - December 2023",
+       caption = "Source: National Centers for Environmental Information") +
+  theme_void() +
+  theme(
+    legend.position = "bottom",
+    legend.title = element_blank(),
+    plot.caption = element_text(face = "italic",
+                                margin = margin(t = 2, r = 0.5, b = 0, l = 0, "lines"))
+  )
+
+base_map
+```
+
+Because we want to map precipitation relative to the 20th century average (e.g. has precipitation for a given region over the last 5 years been above or below the average), a divering color palette makes a lot of sense.
+
+## Color Palette + Application to Unclassed Map
+
+```{r}
+RColorBrewer::display.brewer.pal(n = 11, name = 'BrBG')
+my_brew_palette11 <- RColorBrewer::brewer.pal(n = 11, name = 'BrBG')
+my_brew_palette11
+
+base_map + 
+  scale_fill_gradientn(colors = my_brew_palette11,
+                       # takes number and multiplies it by 1 and adds percentage symbol
+                       labels = scales::label_percent(scale = 1),
+                       # separate scalebar byincrements of 10
+                       breaks = scales::breaks_width(width = 10)) +
+  guides(fill = guide_colorbar(barwidth = 15, barheight = 0.75))
+```
+
+0% (i.e. no change between 5-year precipitation and 20th century average) is currently on the bluer side of our color scale, rather than on the off-white color that's at the center of our palette.
+
+As a result, our map may be misleading -- it would appear as if more counties received higher-than-average precipitation than in actuality.
+
+```{r}
+base_map + 
+  scale_fill_gradientn(colors = my_brew_palette11,
+                       labels = scales::label_percent(scale = 1),
+                       breaks = scales::breaks_width(width = 10),
+                      # minimum, center point, maximum value 
+                       values = scales::rescale(x = c(
+                         min(na.omit(joined_precip_geom)$perc_change),
+                         0,
+                         max(na.omit(joined_precip_geom)$perc_change)))) +
+  guides(fill = guide_colorbar(barwidth = 15, barheight = 0.75))
+```
+
+## Classed Map
+
+```{r}
+RColorBrewer::display.brewer.pal(n = 10, name = 'BrBG')
+my_brew_palette10 <- RColorBrewer::brewer.pal(n = 10, name = 'BrBG')
+my_brew_palette10
+```
+
+By dropping the off-white hue, we can construct our scale so that 0% sits at the break point between brown and blue shades -- any county that received more than the historical average will be a shade of blue, and any that received less will be a shade of brown.
+
+```{r}
+# base resolution is low and only shows 4 color bins
+base_map + 
+  # fills based on bins of color scale set
+  scale_fill_stepsn(colors = my_brew_palette10,
+                    labels = scales::label_percent(scale = 1)) +
+  guides(fill = guide_colorsteps(barwidth = 25, barheight = 0.75))
+
+# breaks set to a width of 10 to have all 10 color bins present on map
+base_map + 
+  scale_fill_stepsn(colors = my_brew_palette10,
+                    # turn legend scale into percentage
+                    labels = scales::label_percent(scale = 1),
+                    # creating breaks at every 10 units
+                    breaks = scales::breaks_width(width = 10)) +
+  guides(fill = guide_colorsteps(barwidth = 25, barheight = 0.75))
+
+# breaks set to a width of 5 and rescaled with 0 at the center
+base_map + 
+  scale_fill_stepsn(colors = my_brew_palette10,
+                    labels = scales::label_percent(scale = 1),
+                    values = scales::rescale(x = c(
+                         min(na.omit(joined_precip_geom)$perc_change),
+                         0,
+                         max(na.omit(joined_precip_geom)$perc_change))), 
+                    breaks = scales::breaks_width(width = 5)) +
+  guides(fill = guide_colorsteps(barwidth = 25, barheight = 0.75))
+```
+
+## Unclassed vs. Classed
+
+Classes color scales have sectioned classes of colors that fall into defined bins
+
+-   communicates data falling into pre-defined classes
+
+-    best if you want audience to read values
+
+Unclassed color scales have a continuous color flow
+
+-    focus is on general patterns across space
+
+-    best if you do not want to interpret for your reader - highlights outliers and comparisons between neighbording regions
+
+## Chloropleths
+
+Several maps side-by-side can help you better spot important patterns and tell a more complete story.

@@ -1,0 +1,132 @@
+```{r}
+# load in packages
+library(palmerpenguins)
+library(tidyverse)
+library(NatParksPalettes)
+```
+
+```{r}
+# create categorical base plot
+cat_color_plot <- ggplot(penguins, aes(x = bill_length_mm, y = bill_depth_mm, color = species, shape = species)) +
+  geom_point(size = 4, alpha = 0.8)
+
+cat_color_plot 
+```
+
+```{r}
+# create quantitative base plot
+cont_color_plot <- ggplot(penguins, aes(x = bill_length_mm, y = bill_depth_mm, color = body_mass_g)) +
+  geom_point(size = 4, alpha = 0.8) 
+
+cont_color_plot 
+```
+
+## Viridis Scales
+```{r}
+cat_color_plot +
+  scale_color_viridis_d(option = "viridis", direction = -1)
+
+cont_color_plot +
+  scale_color_viridis_c(option = "magma")
+```
+
+## RColorBrewer
+```{r}
+RColorBrewer::display.brewer.all(colorblindFriendly = TRUE)
+RColorBrewer::display.brewer.pal(n = 6, name = "Dark2")
+my_pal <- RColorBrewer::brewer.pal(n=4, name = "Dark2")
+
+cat_color_plot +
+  scale_color_brewer(palette = "Dark2")
+
+cont_color_plot +
+  scale_color_distiller(palette = "BuPu")
+
+cont_color_plot +
+  scale_color_fermenter(palette = "YlGnBu")
+```
+
+### Tip: Outline Points
+```{r}
+# create quantitative base plot ready for outlines
+cont_color_plot_outline <- ggplot(penguins, aes(x = bill_length_mm,
+                                        y = bill_depth_mm,
+                                        fill = body_mass_g)) +
+  # shape = 21 allows for a fillable point
+  geom_point(shape = 21, size = 4, alpha = 0.8) +
+  scale_fill_distiller(palette = "BuPu")
+
+cont_color_plot_outline
+```
+
+## Paletteer package
+
+```{r}
+cat_color_plot +
+  paletteer::scale_color_paletteer_d("calecopal::superbloom3")
+
+# sometimes palettes don't always pull continuous well so build your own palette and then apply
+my_parks_palette <- NatParksPalettes::natparks.pals(
+  name = "WindCave", n = 20, type = "continuous"
+)
+
+cont_color_plot +
+  scale_color_gradientn(colors = rev(my_parks_palette))
+```
+
+## Designing own palette
+
+Save palette outside of ggplot and name the colors
+
+```{r}
+my_palette <- c("#32DE8A", "#E36414", "#0F4C5C")
+
+# scale our colors for a categorical variable (species) using scale_color_manual()
+cat_color_plot +
+  scale_color_manual(values = my_palette)
+
+# the colors don't necessarily stay consistent as we plot though, ie if a species is removed gentoo changes color
+my_palette_named <- c("Adelie" = "#32DE8A","Chinstrap" = "#E36414", "Gentoo" = "#0F4C5C")
+
+# recreate with no filtering
+ggplot(penguins, aes(x = bill_length_mm, y = bill_depth_mm, color = species)) +
+  geom_point(size = 4, alpha = 0.8) +
+  scale_color_manual(values = my_palette_named)
+
+# with filtering we stay consistent with color
+penguins |> 
+  filter(species != "Chinstrap") |> 
+  ggplot(aes(x = bill_length_mm, y = bill_depth_mm, color = species)) +
+  geom_point(size = 4, alpha = 0.8) +
+  scale_color_manual(values = my_palette_named)
+```
+
+```{r}
+# color points based on which condition they satisfy
+penguins |> 
+  mutate(
+    my_color = case_when(
+      bill_length_mm < 40 ~ "#D7263D",
+      between(bill_length_mm, 40, 50) ~ "#E4BB97",
+      bill_length_mm > 50 ~ "#386150"
+    )
+  ) |> 
+  ggplot(aes(x = bill_length_mm, y = bill_depth_mm, color = my_color)) +
+  geom_point(size = 4, alpha = 0.8) +
+  # how we apply 
+  scale_color_identity()
+
+# highlight certain body_masses
+penguins |> 
+  mutate(
+    my_color = case_when(
+      body_mass_g > 6000 ~ "#D7263D",
+      TRUE ~ "gray50"
+    )
+  ) |> 
+  ggplot(aes(x = bill_length_mm, y = bill_depth_mm, color = my_color)) +
+  geom_point(size = 4, alpha = 0.8) +
+  scale_color_identity(guide = "legend", 
+                       name = "Body mass (g)", labels = c(">6000", "<= 6000"))
+```
+
