@@ -1,0 +1,402 @@
+---
+title: "lecture 6-1"
+format: html
+editor: visual
+---
+
+```{r}
+# load packages
+library(monochromeR) # a package for creating monochrome color palettes and easily converting rgba values to hex codes (and also some other useful functions)
+library(showtext) # for using fonts more easily in R graphs
+library(ggtext) # improved text rendering support for ggplot2
+library(ggrepel) # ggplot2 extension to repel overlapping labels
+library(googlesheets4) # provides an R interface to Google Sheets via the Sheets API v4
+```
+
+## System Fonts
+
+A system font is one that's already assumed to be on the vast majority of users' devices, with no need for a web font to be downloaded.
+
+```{r}
+library(palmerpenguins)
+library(tidyverse)
+
+ggplot(penguins, aes(x = bill_length_mm, y = bill_depth_mm)) +
+  geom_point() + 
+  labs(title = "This title is serif font",
+       subtitle = "This subtitle is mono font",
+       x = "This axis label is sans font (default)",
+       y = "This axis is also sans font (default)") +
+  theme(
+    plot.title = element_text(family = "serif", size = 30),
+    plot.subtitle = element_text(family = "mono", size = 25),
+    axis.title = element_text(family = "sans", size = 22),
+    axis.text.x = element_text(family = "serif", face = "bold", size = 18),
+    axis.text.y = element_text(family = "mono", face = "italic", size = 18)
+  )
+```
+
+A graphics device (GD) is something used to make a plot appear -- everytime you create a plot in R, it needs to be sent to a specific GD to be rendered. There are two main device types:
+
+-   screen devices: the most common place for your plot to be "sent" -- whenever our plot appears in a window on our computer screen, it's being sent to a screen device; different operating systems (e.g. Mac, Windows, Linux) have different screen devices
+
+-   file devices: if we want to write (i.e. save) our plot to a file, we can send our plot to a particular file device (e.g. pdf, png, jpeg)
+
+Unfortunately, text drawing is handled differently by each graphics device, which means that if we want a font to work everywhere, we need to configure all these different devices in different ways.
+
+Let's explore this:
+
+```{r}
+##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+##                                    setup                                 ----
+##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+#..........................load packages.........................
+library(tidyverse)
+
+#..........................import data...........................
+jobs <- read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2019/2019-03-05/jobs_gender.csv")
+
+##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+##                                wrangle data                              ----
+##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+jobs_clean <- jobs |>
+  
+  # add cols (needed for dumbbell plot) ----
+mutate(percent_male = 100 - percent_female, # % of females within each industry was already included
+       difference_earnings = total_earnings_male - total_earnings_female) |>  # diff in earnings between M & F
+  
+  # rearrange columns ----
+relocate(year, major_category, minor_category, occupation,
+         total_workers, workers_male, workers_female,
+         percent_male, percent_female,
+         total_earnings, total_earnings_male, total_earnings_female, difference_earnings,
+         wage_percent_of_male) |>
+  
+  # drop rows with missing earning data ----
+drop_na(total_earnings_male, total_earnings_female) |>
+  
+  # make occupation a factor ----
+mutate(occupation = as.factor(occupation)) |>
+  
+  # ---- this next step is for creating our dumbbell plots ----
+
+# classify jobs by percentage male or female ----
+mutate(group_label = case_when(
+  percent_female >= 75 ~ "Occupations that are 75%+ female",
+  percent_female >= 45 & percent_female <= 55 ~ "Occupations that are 45-55% female",
+  percent_male >= 75 ~ "Occupations that are 75%+ male"
+))
+
+##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+##                              create subset df                            ----
+##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+#....guarantee the same random samples each time we run code.....
+set.seed(0)
+
+#.........get 10 random jobs that are 75%+ female (2016).........
+f75 <- jobs_clean |>
+  filter(year == 2016, group_label == "Occupations that are 75%+ female") |>
+  slice_sample(n = 10)
+
+#..........get 10 random jobs that are 75%+ male (2016)..........
+m75 <- jobs_clean |>
+  filter(year == 2016, group_label == "Occupations that are 75%+ male") |>
+  slice_sample(n = 10)
+
+#........get 10 random jobs that are 45-55%+ female (2016).......
+f50 <- jobs_clean |>
+  filter(year == 2016, group_label == "Occupations that are 45-55% female") |>
+  slice_sample(n = 10)
+
+#.......combine dfs & relevel factors (for plotting order).......
+subset_jobs <- rbind(f75, m75, f50) |>
+  mutate(group_label = fct_relevel(group_label, 
+                                   "Occupations that are 75%+ female",
+                                   "Occupations that are 45-55% female", 
+                                   "Occupations that are 75%+ male"))
+#.......build occupation original plot to build off of.......
+plot <- ggplot(subset_jobs) +
+  geom_segment(aes(x = total_earnings_female, xend = total_earnings_male,
+                   y = fct_reorder(occupation, total_earnings), yend = occupation)) +
+  geom_point(aes(x = total_earnings_male, y = occupation),
+             color = "#CD93D8", size = 3.25) +
+  geom_point(aes(x = total_earnings_female, y = occupation),
+             color = "#6A1E99", size = 3.25) +
+  facet_wrap(~group_label, nrow = 3, scales = "free_y") +
+  scale_x_continuous(labels = scales::label_dollar(scale = 0.001, suffix = "k"),
+                     breaks = c(25000, 50000, 75000, 100000, 125000))
+
+plot
+```
+
+Let's create a better color palette that is predictable but avoids stereotypes:
+
+```{r}
+# create a named vector fo colors to call from
+earnings_pal <- c("males" = "#2D7787",
+                  "females" = "#FC6B4B",
+                  dark_text = "#0C1509",
+                  light_text = "#4E514D") 
+# use monochromeR to view color palettes
+monochromeR::view_palette(earnings_pal)
+```
+
+Now we apply the colors by name through indexing:
+
+```{r}
+plot <- ggplot(subset_jobs) +
+  geom_segment(aes(x = total_earnings_female, xend = total_earnings_male,
+                   y = fct_reorder(occupation, total_earnings), yend = occupation)) +
+  geom_point(aes(x = total_earnings_male, y = occupation),
+             color = earnings_pal["males"], size = 3.25) +
+  geom_point(aes(x = total_earnings_female, y = occupation),
+             color = earnings_pal["females"], size = 3.25) +
+  facet_wrap(~group_label, nrow = 3, scales = "free_y") +
+  scale_x_continuous(labels = scales::label_dollar(scale = 0.001, suffix = "k"),
+                     breaks = c(25000, 50000, 75000, 100000, 125000))
+
+plot
+```
+
+Now let's update the theme arguments:
+
+```{r}
+plot +
+  labs(title = "Males earn more than females across most occupations",
+       subtitle = "Median earnings of full-time male vs. female workers by occupation in 2016",
+       caption = "Data Source: TidyTuesday (March 5, 2019)") +
+  theme_minimal() +
+  theme(
+    # moves text to the edge of whole plot not just plot space
+    plot.title.position = "plot",
+    plot.title = element_text(face = "bold",
+                              size = 25,
+                              color = earnings_pal["dark_text"]),
+    plot.subtitle = element_text(size = 17,
+                                 color = earnings_pal["light_text"],
+                                 margin = margin(t = 0.5, r = 0, b = 1, l = 0, unit = "lines")),
+    plot.caption = element_text(face = "italic",
+                                color = earnings_pal["light_text"],
+                                margin = margin(t = 3, r = 0, b = 0, l = 0, unit = "lines")),
+    strip.text.x = element_text(face = "bold",
+                                size = 12,
+                                hjust = 0),
+    panel.spacing.y = unit(x = 1, "lines"),
+    axis.text = element_text(color = earnings_pal["light_text"]),
+    axis.text.x = element_text(size = 10),
+    axis.title = element_blank()
+  )
+```
+
+Import Google Fonts
+
+```{r}
+##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+##                                    setup                                 ----
+##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+#..........................load packages.........................
+library(tidyverse)
+library(showtext)
+
+#..........................import fonts..........................
+# `name` is the name of the font as it appears in Google Fonts
+# `family` is the user-specified id that you'll use to apply a font in your ggpplot
+font_add_google(name = "Josefin Sans", family = "josefin")
+font_add_google(name = "Sen", family = "sen")
+
+#................enable {showtext} for rendering.................
+showtext_auto()
+```
+
+Now let's apply Google Fonts:
+
+```{r}
+plot +
+  labs(title = "Males earn more than females across most occupations",
+       subtitle = "Median earnings of full-time male vs. female workers by occupation in 2016",
+       caption = "Data Source: TidyTuesday (March 5, 2019)") +
+  theme_minimal() +
+  theme(
+    plot.title.position = "plot",
+    plot.title = element_text(family = "josefin",
+                              face = "bold",
+                              size = 25,
+                              color = earnings_pal["dark_text"]),
+    plot.subtitle = element_text(family = "sen",
+                                 size = 17,
+                                 color = earnings_pal["light_text"],
+                                 margin = margin(t = 0.5, r = 0, b = 1, l = 0, unit = "lines")),
+    plot.caption = element_text(family = "sen",
+                                face = "italic", # NOTE: this no longer applies since the typeface "Sen" does not exist in an italic font style
+                                color = earnings_pal["light_text"],
+                                margin = margin(t = 3, r = 0, b = 0, l = 0, unit = "lines")),
+    strip.text.x = element_text(family = "josefin",
+                                face = "bold",
+                                size = 12,
+                                hjust = 0),
+    panel.spacing.y = unit(x = 1, "lines"),
+    axis.text = element_text(family = "sen",
+                             color = earnings_pal["light_text"]),
+    axis.text.x = element_text(size = 10),
+    axis.title = element_blank()
+  )
+```
+
+Font-Awesome
+
+```{r}
+##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+##                                    setup                                 ----
+##~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+#..........................load packages.........................
+library(tidyverse)
+library(showtext)
+
+#....................import Font Awesome fonts...................
+font_add(family = "fa-brands",
+         regular = here::here("fonts", "Font Awesome 6 Brands-Regular-400.otf"))
+font_add(family = "fa-regular",
+         regular = here::here("fonts", "Font Awesome 6 Free-Regular-400.otf")) 
+font_add(family = "fa-solid",
+         regular = here::here("fonts", "Font Awesome 6 Free-Solid-900.otf"))
+
+#................enable {showtext} for rendering.................
+showtext_auto()
+```
+
+Now let's apply:
+
+To use this unicode in HTML, we need to stick a &#x ahead of it. We can make our lives a bit easier by saving our unicode (as well as our username text) to variable names. We'll then use the glue::glue() function to construct our full caption. Importantly, glue() will evaluate expressions enclosed by braces as R code.
+
+```{r}
+#.........................create caption.........................
+github_icon <- "&#xf09b"
+github_username <- "samanthacsik"
+
+caption <- glue::glue(
+  "Data Source: TidyTuesday (March 5, 2019) |
+  <span style='font-family:fa-brands;'>{github_icon};</span>
+  {github_username}"
+)
+```
+
+Let's add the icon to the subtitle
+
+```{r}
+#........................create subtitle.........................
+money_icon <- "&#xf3d1"
+
+subtitle <- glue::glue("Median earnings 
+                       <span style='font-family:fa-regular;'>{money_icon};</span>
+                       of full-time male versus female workers by occupation in 2016")
+#........................add to subtitle.........................
+plot +
+  labs(title = "Males earn more than females across most occupations",
+       subtitle = subtitle,
+       caption = caption) +
+  theme_minimal() +
+  theme(
+    plot.title.position = "plot",
+    plot.title = element_text(family = "josefin",
+                              face = "bold",
+                              size = 25),
+    plot.subtitle = element_text(family = "sen",
+                                 size = 17,
+                                 color = earnings_pal["light_text"],
+                                 margin = margin(t = 0.5, r = 0, b = 1, l = 0, unit = "lines")),
+    plot.caption = element_text(family = "sen",
+                                face = "italic", # NOTE: this no longer applies since the typeface "sen" does not exist in an italic font style
+                                color = earnings_pal["light_text"],
+                                margin = margin(t = 3, r = 0, b = 0, l = 0, unit = "lines")),
+    strip.text.x = element_text(family = "josefin",
+                                face = "bold",
+                                size = 12,
+                                hjust = 0),
+    panel.spacing.y = unit(1, "lines"),
+    axis.text = element_text(family = "sen",
+                             color = earnings_pal["light_text"]),
+    axis.text.x = element_text(size = 10),
+    axis.title = element_blank()
+  )
+```
+
+If we want to render ggplot text using HTML or Markdown syntax, we also need to use one of {ggtext}'s theme() elements, which will parse and render the applied styles.
+
+```{r}
+plot +
+  labs(title = "Males earn more than females across most occupations",
+       subtitle = subtitle,
+       caption = caption) +
+  theme_minimal() +
+  theme(
+    plot.title.position = "plot",
+    plot.title = element_text(family = "josefin",
+                              face = "bold",
+                              size = 25),
+    plot.subtitle = ggtext::element_textbox_simple(family = "sen",
+                                                   size = 17,
+                                                   color = earnings_pal["light_text"],
+                                                   margin = margin(t = 0.5, r = 0, b = 1, l = 0, unit = "lines")),
+    plot.caption = ggtext::element_textbox_simple(family = "sen",
+                                                  face = "italic", # NOTE: this no longer applies since the typeface "sen" does not exist in an italic font style
+                                                  color = earnings_pal["light_text"],
+                                                  margin = margin(t = 3, r = 0, b = 0, l = 0, unit = "lines")),
+    strip.text.x = element_text(family = "josefin",
+                                face = "bold",
+                                size = 12,
+                                hjust = 0),
+    panel.spacing.y = unit(1, "lines"),
+    axis.text = element_text(family = "sen",
+                             color = earnings_pal["light_text"]),
+    axis.text.x = element_text(size = 10),
+    axis.title = element_blank()
+  )
+```
+
+We also want to tell people what the color means
+
+```{r}
+#........................create subtitle.........................
+# **text** becomes bolded
+money_icon <- "&#xf3d1"
+
+subtitle2 <- glue::glue("Median earnings <span style='font-family:fa-regular;'>{money_icon};</span>
+                       of full-time
+                       <span style='color:#2D7787;font-size:20pt;'>**male**</span>
+                       versus <span style='color:#FC6B4B;font-size:20pt;'>**female**</span>
+                       workers by occupation in 2016")
+
+plot +
+  labs(title = "Males earn more than females across most occupations",
+       subtitle = subtitle2,
+       caption = caption) +
+  theme_minimal() +
+  theme(
+    plot.title.position = "plot",
+    plot.title = element_text(family = "josefin",
+                              face = "bold",
+                              size = 25),
+    plot.subtitle = ggtext::element_textbox_simple(family = "sen",
+                                                   size = 17,
+                                                   color = earnings_pal["light_text"],
+                                                   margin = margin(t = 0.5, r = 0, b = 1, l = 0, unit = "lines")),
+    plot.caption = ggtext::element_textbox_simple(family = "sen",
+                                                  face = "italic", # NOTE: this no longer applies since the typeface "sen" does not exist in an italic font style
+                                                  color = earnings_pal["light_text"],
+                                                  margin = margin(t = 3, r = 0, b = 0, l = 0, unit = "lines")),
+    strip.text.x = element_text(family = "josefin",
+                                face = "bold",
+                                size = 12,
+                                hjust = 0),
+    panel.spacing.y = unit(1, "lines"),
+    axis.text = element_text(family = "sen",
+                             color = earnings_pal["light_text"]),
+    axis.text.x = element_text(size = 10),
+    axis.title = element_blank()
+  )
+```
